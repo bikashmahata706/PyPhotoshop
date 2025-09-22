@@ -3,20 +3,21 @@ import threading
 from typing import Dict, Optional, Callable
 from PIL import Image, ImageTk
 import numpy as np
-from tools.base_tool import BaseTool  # নতুন added line
+from tools.base_tool import BaseTool
 
 class AppState:
     def __init__(self, root):
         self.root = root
         self.canvas = None
         self.active_tool = None
-        self.tools: Dict[str, BaseTool] = {}  # এখন error show করবে না
+        self.tools: Dict[str, BaseTool] = {}
         self.layers = []
         self.active_layer_index = -1
         self.zoom_level = 1.0
         self.history_manager = None
         self.worker_pool = None
         self.renderer = None
+        self.current_file = None
         
     def set_canvas(self, canvas):
         self.canvas = canvas
