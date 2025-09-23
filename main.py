@@ -3,6 +3,10 @@ from tkinter import ttk, colorchooser, filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import numpy as np
 import os
+import numpy as np
+from PIL import Image, ImageTk, ImageDraw, ImageFilter
+import cv2
+import json
 
 # Base Tool Class
 class BaseTool:
@@ -297,7 +301,13 @@ class ImageForge:
         # Layer menu
         layer_menu = tk.Menu(menubar, tearoff=0, bg="#2d2d30", fg="#cccccc")
         layer_menu.add_command(label="New", command=self.new_layer_menu)
-        layer_menu.add_command(label="Duplicate Layer...", command=self.duplicate_layer)
+        def duplicate_layer(self):
+            if hasattr(self, 'layers') and self.layers and self.current_layer_index < len(self.layers):
+                current_layer = self.layers[self.current_layer_index]
+                new_layer = current_layer.copy()
+                self.layers.append(new_layer)
+                self.current_layer_index = len(self.layers) - 1
+                self.update_layer_listbox()
         layer_menu.add_command(label="Delete", command=self.delete_layer_menu)
         layer_menu.add_separator()
         layer_menu.add_command(label="Layer Properties...", command=self.layer_properties)
