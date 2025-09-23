@@ -1,172 +1,17 @@
+# main.py - Corrected imports section
 import tkinter as tk
 from tkinter import ttk, colorchooser, filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import numpy as np
 import os
-import numpy as np
-from PIL import Image, ImageTk, ImageDraw, ImageFilter
 import cv2
 import json
 
-# Base Tool Class
-class BaseTool:
-    def __init__(self, app):
-        self.app = app
-        
-    def on_activate(self):
-        """Called when the tool is activated"""
-        pass
-        
-    def on_deactivate(self):
-        """Called when the tool is deactivated"""
-        pass
-        
-    def on_mouse_down(self, x, y, modifiers):
-        """Handle mouse button down event"""
-        pass
-        
-    def on_mouse_move(self, x, y, modifiers):
-        """Handle mouse movement"""
-        pass
-        
-    def on_mouse_up(self, x, y, modifiers):
-        """Handle mouse button release"""
-        pass
-        
-    def render_preview(self, draw, zoom):
-        """Render tool preview on the canvas"""
-        pass
-        
-    def commit(self):
-        """Apply permanent changes to the image"""
-        pass
-        
-    def get_affected_bbox(self):
-        """
-        Return the bounding box of affected area
-        Returns: (x1, y1, x2, y2) or None for full image
-        """
-        return None
-        
-    def get_context_menu(self):
-        """Return context menu items for this tool"""
-        return []
+# Tool imports - CORRECTED
+from tools.base_tool import BaseTool
+from tools.move_tool import make_tool as make_move_tool
+from app.core import AppState, ToolManager, Layer
 
-# Move Tool Implementation
-class MoveTool(BaseTool):
-    def __init__(self, app):
-        super().__init__(app)
-        self.start_x = 0
-        self.start_y = 0
-        self.is_dragging = False
-        self.last_x = 0
-        self.last_y = 0
-    
-    def on_activate(self):
-        if self.app.canvas:
-            self.app.canvas.config(cursor="fleur")
-    
-    def on_deactivate(self):
-        if self.app.canvas:
-            self.app.canvas.config(cursor="")
-    
-    def on_mouse_down(self, x, y, modifiers):
-        self.start_x = x
-        self.start_y = y
-        self.last_x = x
-        self.last_y = y
-        self.is_dragging = True
-    
-    def on_mouse_move(self, x, y, modifiers):
-        if self.is_dragging:
-            dx = x - self.last_x
-            dy = y - self.last_y
-            self.last_x = x
-            self.last_y = y
-            
-            # Scroll the canvas
-            self.app.canvas.xview_scroll(-dx, "pixels")
-            self.app.canvas.yview_scroll(-dy, "pixels")
-    
-    def on_mouse_up(self, x, y, modifiers):
-        self.is_dragging = False
-    
-    def on_mouse_wheel(self, event):
-        # Zoom with Ctrl+Mouse wheel
-        if event.state & 0x4:  # Ctrl key pressed
-            zoom_factor = 1.1 if event.delta > 0 else 0.9
-            self.app.app_state.zoom_level *= zoom_factor
-    
-    def get_context_menu(self):
-        return [
-            ("Auto-Select", lambda: print("Auto-Select toggled")),
-            ("Show Transform Controls", lambda: print("Transform Controls toggled")),
-            ("---", None),
-            ("Free Transform", lambda: print("Free Transform activated")),
-            ("---", None),
-            ("Align Left", lambda: print("Align Left")),
-            ("Align Center", lambda: print("Align Center")),
-            ("Align Right", lambda: print("Align Right")),
-        ]
-
-def make_move_tool(app):
-    return MoveTool(app)
-
-# App State and Core Classes
-class AppState:
-    def __init__(self, root):
-        self.root = root
-        self.canvas = None
-        self.active_tool = None
-        self.tools = {}
-        self.layers = []
-        self.active_layer_index = -1
-        self.zoom_level = 1.0
-        self.history_manager = None
-        self.worker_pool = None
-        self.renderer = None
-        self.current_file = None
-        self.foreground_color = "black"
-        self.background_color = "white"
-        
-    def set_canvas(self, canvas):
-        self.canvas = canvas
-        
-    def register_tool(self, name, tool_factory):
-        self.tools[name] = tool_factory(self)
-        
-    def set_active_tool(self, tool_name):
-        if self.active_tool:
-            self.active_tool.on_deactivate()
-            
-        if tool_name in self.tools:
-            self.active_tool = self.tools[tool_name]
-            self.active_tool.on_activate()
-            return True
-        return False
-
-class ToolManager:
-    def __init__(self, app_state):
-        self.app = app_state
-        
-    def register_tool(self, name, tool_factory):
-        self.app.register_tool(name, tool_factory)
-        
-    def switch_tool(self, tool_name):
-        return self.app.set_active_tool(tool_name)
-
-class Layer:
-    def __init__(self, name, width, height):
-        self.name = name
-        self.image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        self.visible = True
-        self.opacity = 1.0
-        self.blend_mode = "normal"
-        self.locked = False
-        self.mask = None
-        
-    def get_thumbnail(self, size=(64, 64)):
-        return self.image.resize(size, Image.Resampling.LANCZOS)
 
 # Main Application Class
 class ImageForge:
@@ -193,6 +38,9 @@ class ImageForge:
         # Initialize tool manager
         self.tool_manager = ToolManager(self.app_state)
         self.register_tools()
+
+        self.app_state.setup_renderer(self.canvas)  # Canvas দিয়ে renderer setup
+        self.app_state.renderer.fit_to_screen()
         
         # Set initial tool
         self.tool_manager.switch_tool("move")
@@ -203,7 +51,25 @@ class ImageForge:
         # Current colors
         self.foreground_color = "black"
         self.background_color = "white"
-        
+        self.root.bind('<Configure>', self._on_window_resize)
+    
+    def _on_window_resize(self, event):
+        """Handle main window resize"""
+        # Only handle when the root window is resized (not child widgets)
+        if event.widget == self.root:
+            print(f"🏠 Window resized to: {event.width}x{event.height}")
+            
+            # Force canvas update
+            self.canvas.update_idletasks()
+            
+            # Trigger renderer resize if image is loaded
+            if (hasattr(self.app_state, 'renderer') and 
+                self.app_state.renderer and 
+                hasattr(self.app_state, 'original_image') and 
+                self.app_state.original_image):
+                
+                self.app_state.renderer.fit_to_screen()
+
     def create_menu_bar(self):
         # Menu bar with Photoshop-like styling
         menubar = tk.Menu(self.root, tearoff=0, bg="#2d2d30", fg="#cccccc")
@@ -808,17 +674,18 @@ class ImageForge:
         x2 = x1 + placeholder_width
         y2 = y1 + placeholder_height
         
-        # Create centered placeholder
-        self.placeholder = self.canvas.create_rectangle(x1, y1, x2, y2, 
-                                                       fill="#3c3c3c", outline="#5a5a5a")
-        self.placeholder_text = self.canvas.create_text(canvas_width/2, canvas_height/2, 
-                                                       text="Create or Open an Image", 
-                                                       fill="#cccccc", font=("Arial", 12))
+
     
     def register_tools(self):
         # Register tools here
         self.tool_manager.register_tool("move", make_move_tool)
+        
+        # ADD BRUSH TOOL
+        from tools.brush import make_tool as make_brush_tool
+        self.tool_manager.register_tool("brush", make_brush_tool)
+        
         # Add more tools as we implement them
+            
     
     def bind_tool_events(self):
         # Bind right-click event for canvas
@@ -1036,13 +903,53 @@ class ImageForge:
     
     # Menu command methods (simplified implementations)
     def new_file(self): 
-        print("New file dialog would open here")
+        # Simple new file dialog
+        from tkinter import simpledialog
+        width = simpledialog.askinteger("New Image", "Width:", initialvalue=800)
+        height = simpledialog.askinteger("New Image", "Height:", initialvalue=600)
+        if width and height:
+            self.app_state.renderer.create_new_image(width, height)
     
+
+    # In main.py, update the open_file method:
+
     def open_file(self): 
-        filename = filedialog.askopenfilename(title="Open Image", 
-                                            filetypes=[("Image files", "*.jpg *.jpeg *.png *.gif *.bmp *.tiff")])
+        filename = filedialog.askopenfilename(
+            title="Open Image", 
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.gif *.bmp *.tiff")]
+        )
         if filename:
-            print(f"Opening file: {filename}")
+            print(f"📁 Opening: {filename}")
+            
+            # Force UI update before loading
+            self.root.update()
+            self.canvas.update_idletasks()
+            
+            # Clear any existing selections or states
+            if hasattr(self, 'layers_listbox'):
+                self.layers_listbox.selection_clear(0, tk.END)
+            
+            if hasattr(self.app_state, 'renderer') and self.app_state.renderer:
+                print("🔄 Calling renderer.load_image()...")
+                success = self.app_state.renderer.load_image(filename)
+                
+                if success:
+                    self.root.title(f"ImageForge - {filename}")
+                    
+                    # Additional verification
+                    if (hasattr(self.app_state, 'original_image') and 
+                        self.app_state.original_image is not None):
+                        print("🎉 Image loaded and verified in app state!")
+                    else:
+                        print("⚠️ Image loaded but not in app state!")
+                    
+                    # Force final update
+                    self.canvas.update_idletasks()
+                    self.root.update()
+                else:
+                    print("💥 Failed to load image")
+            else:
+                print("💥 Renderer not available")
     
     def save_file(self): 
         print("Save file command")
@@ -1210,7 +1117,7 @@ class ImageForge:
     def system_info(self): print("System Info")
     def updates(self): print("Updates")
     def manage_extensions(self): print("Manage Extensions")
-
+    
 
 if __name__ == "__main__":
     root = tk.Tk()
