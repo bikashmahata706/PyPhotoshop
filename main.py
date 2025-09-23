@@ -1211,6 +1211,7 @@ class ImageForge:
     def updates(self): print("Updates")
     def manage_extensions(self): print("Manage Extensions")
 
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = ImageForge(root)
