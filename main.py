@@ -31,6 +31,7 @@ class ImageForge:
         # Create interface components
         self.create_menu_bar()
         self.create_option_bar()
+        self.create_tab_bar()
         self.create_tool_bar()
         self.create_main_content()
         self.create_layers_panel()
@@ -52,6 +53,13 @@ class ImageForge:
         self.foreground_color = "black"
         self.background_color = "white"
         self.root.bind('<Configure>', self._on_window_resize)
+
+        self.root.bind('<Control-z>', lambda e: self.undo())
+        self.root.bind('<Control-y>', lambda e: self.redo())
+        self.root.bind('<Control-Z>', lambda e: self.redo())
+        self.root.bind('<Control-n>', lambda e: self.new_file())
+        self.root.bind('<Control-o>', lambda e: self.open_file())
+        self.root.bind('<Control-s>', lambda e: self.save_file())
     
     def _on_window_resize(self, event):
         """Handle main window resize"""
@@ -349,6 +357,162 @@ class ImageForge:
         
         # Show default options for move tool
         self.show_tool_options("move")
+
+    def create_tab_bar(self):
+        """Create tab bar for multiple document support - IMPROVED"""
+        self.tab_bar = tk.Frame(self.main_container, bg="#2d2d30", height=35)  # Darker background
+        self.tab_bar.pack(side=tk.TOP, fill=tk.X, after=self.option_bar)
+        self.tab_bar.pack_propagate(False)
+        
+        self.tab_container = tk.Frame(self.tab_bar, bg="#2d2d30")
+        self.tab_container.pack(fill=tk.X, padx=5, pady=2)
+        
+        self.tab_buttons = {}
+        self.update_tab_bar()
+
+    def update_tab_bar(self):
+        """Simpler version with visible close button"""
+        # Clear existing tabs
+        for widget in self.tab_container.winfo_children():
+            widget.destroy()
+        
+        self.tab_buttons = {}
+        
+        # Create tabs for each document
+        for i, doc in enumerate(self.app_state.documents):
+            is_active = (i == self.app_state.active_document_index)
+            tab_bg = "#5a5a5a" if is_active else "#3c3c3c"
+            
+            # Create tab frame
+            tab_frame = tk.Frame(self.tab_container, bg=tab_bg, relief="sunken" if is_active else "raised", 
+                                borderwidth=1, height=30)
+            tab_frame.pack(side=tk.LEFT, padx=(0, 1))
+            
+            # Filename label
+            display_name = doc.filename
+            if len(display_name) > 20:
+                display_name = display_name[:17] + "..."
+            
+            tab_label = tk.Label(tab_frame, text=display_name, bg=tab_bg, 
+                                fg="white", padx=10, pady=5, font=("Arial", 9))
+            tab_label.pack(side=tk.LEFT)
+            
+            self.create_tooltip(tab_label, doc.filename)
+            
+            # **SIMPLE VISIBLE CLOSE BUTTON**
+            close_btn = tk.Button(tab_frame, text="X", 
+                                bg="#ff4444", fg="white",  # Red background, white text
+                                relief="raised", borderwidth=1,
+                                font=("Arial", 8, "bold"),
+                                width=2, height=1,
+                                command=lambda idx=i: self.close_tab(idx))
+            close_btn.pack(side=tk.RIGHT, padx=5, pady=2)
+            
+            # Bind events
+            tab_label.bind("<Button-1>", lambda e, idx=i: self.switch_tab(idx))
+            tab_frame.bind("<Button-1>", lambda e, idx=i: self.switch_tab(idx))
+            
+            self.tab_buttons[i] = (tab_frame, tab_label, close_btn)
+        
+        # Show/hide tab bar
+        if len(self.app_state.documents) == 0:
+            self.tab_bar.pack_forget()
+        else:
+            self.tab_bar.pack(side=tk.TOP, fill=tk.X, after=self.option_bar)
+
+    def switch_tab(self, index):
+        """Switch to different tab/document - FIXED VERSION"""
+        if 0 <= index < len(self.app_state.documents):
+            print(f"🔄 Switching to tab {index}")
+            
+            self.app_state.active_document_index = index
+            self.update_tab_bar()
+            
+            # Update window title
+            active_doc = self.app_state.active_document
+            if active_doc:
+                self.root.title(f"ImageForge - {active_doc.filename}")
+            
+            # FORCE RENDER with proper cleanup
+            if self.app_state.renderer:
+                # Clear canvas first
+                self.app_state.renderer.canvas.delete("all")
+                
+                # Force render
+                self.app_state.renderer.render(force=True)
+                
+                # Extra updates to ensure display
+                self.app_state.renderer.canvas.update_idletasks()
+                self.canvas.update_idletasks()
+            
+            print(f"✅ Switched to tab {index}")
+
+    def close_tab(self, index):
+        """Close a tab/document - COMPLETELY FIXED VERSION"""
+        if 0 <= index < len(self.app_state.documents):
+            print(f"🗑️ Closing tab {index}, total docs: {len(self.app_state.documents)}")
+            
+            # Store the current active index before closing
+            was_active = (index == self.app_state.active_document_index)
+            
+            # Close the document
+            self.app_state.close_document(index)
+            
+            # Update tab bar FIRST
+            self.update_tab_bar()
+            
+            # Update window title
+            if self.app_state.active_document:
+                self.root.title(f"ImageForge - {self.app_state.active_document.filename}")
+            else:
+                self.root.title("ImageForge - Professional Image Editor")
+            
+            # FORCE CANVAS UPDATE - This is the key fix!
+            if self.app_state.renderer:
+                # Clear canvas completely
+                self.app_state.renderer.canvas.delete("all")
+                
+                if self.app_state.active_document:
+                    print(f"🔄 Switching to document: {self.app_state.active_document.filename}")
+                    # Force render the active document
+                    self.app_state.renderer.render(force=True)
+                else:
+                    print("🔄 No documents left, showing placeholder")
+                    # Show placeholder with force
+                    self.app_state.renderer._show_placeholder()
+                
+                # Extra force updates
+                self.app_state.renderer.canvas.update_idletasks()
+                self.canvas.update_idletasks()
+            
+            print(f"✅ Tab closed. Active document index: {self.app_state.active_document_index}")
+            return True
+        return False
+    
+    def create_tooltip(self, widget, text):
+        """Create a tooltip for widgets"""
+        def on_enter(event):
+            # Create tooltip window
+            x, y, _, _ = widget.bbox("insert")
+            x += widget.winfo_rootx() + 25
+            y += widget.winfo_rooty() + 25
+            
+            # Create toplevel window
+            self.tooltip = tk.Toplevel(widget)
+            self.tooltip.wm_overrideredirect(True)
+            self.tooltip.wm_geometry(f"+{x}+{y}")
+            
+            label = tk.Label(self.tooltip, text=text, justify='left',
+                            background="#ffffe0", relief='solid', borderwidth=1,
+                            font=("Arial", 10))
+            label.pack(ipadx=1)
+        
+        def on_leave(event):
+            if hasattr(self, 'tooltip'):
+                self.tooltip.destroy()
+        
+        widget.bind("<Enter>", on_enter)
+        widget.bind("<Leave>", on_leave)
     
     def create_tool_bar(self):
         # Tool bar (left side) - Smart tool bar with nested tools
@@ -902,13 +1066,28 @@ class ImageForge:
             self.app_state.active_tool.on_mouse_wheel(event)
     
     # Menu command methods (simplified implementations)
-    def new_file(self): 
-        # Simple new file dialog
-        from tkinter import simpledialog
-        width = simpledialog.askinteger("New Image", "Width:", initialvalue=800)
-        height = simpledialog.askinteger("New Image", "Height:", initialvalue=600)
-        if width and height:
-            self.app_state.renderer.create_new_image(width, height)
+    # main.py এর new_file method পরিবর্তন করুন:
+    def new_file(self):
+        from dialogs.new_file_dialog import NewFileDialog
+        
+        dialog = NewFileDialog(self.root, self)
+        self.root.wait_window(dialog)
+        
+        if dialog.result:
+            result = dialog.result
+            print(f"📄 Creating new document: {result['width']}x{result['height']}")
+            
+            # Create new document with the specified parameters
+            doc = self.app_state.create_new_document(result['width'], result['height'])
+            
+            # Update UI
+            self.update_tab_bar()
+            
+            # Render the new document
+            if self.app_state.renderer:
+                self.app_state.renderer.render(force=True)
+            
+            self.root.title(f"ImageForge - {doc.filename}")
     
 
     # In main.py, update the open_file method:
@@ -921,35 +1100,26 @@ class ImageForge:
         if filename:
             print(f"📁 Opening: {filename}")
             
-            # Force UI update before loading
-            self.root.update()
-            self.canvas.update_idletasks()
-            
-            # Clear any existing selections or states
-            if hasattr(self, 'layers_listbox'):
-                self.layers_listbox.selection_clear(0, tk.END)
-            
-            if hasattr(self.app_state, 'renderer') and self.app_state.renderer:
-                print("🔄 Calling renderer.load_image()...")
-                success = self.app_state.renderer.load_image(filename)
+            try:
+                # Load image
+                new_image = Image.open(filename).convert("RGBA")
                 
-                if success:
-                    self.root.title(f"ImageForge - {filename}")
-                    
-                    # Additional verification
-                    if (hasattr(self.app_state, 'original_image') and 
-                        self.app_state.original_image is not None):
-                        print("🎉 Image loaded and verified in app state!")
-                    else:
-                        print("⚠️ Image loaded but not in app state!")
-                    
-                    # Force final update
-                    self.canvas.update_idletasks()
-                    self.root.update()
-                else:
-                    print("💥 Failed to load image")
-            else:
-                print("💥 Renderer not available")
+                # Create new document using app state
+                doc = self.app_state.open_document(filename, new_image)
+                
+                # Update UI
+                self.update_tab_bar()
+                
+                # Render the document
+                if self.app_state.renderer:
+                    self.app_state.renderer.render(force=True)
+                
+                self.root.title(f"ImageForge - {filename}")
+                print("✅ Document opened successfully")
+                
+            except Exception as e:
+                print(f"❌ Error opening file: {e}")
+                messagebox.showerror("Error", f"Could not open file: {e}")
     
     def save_file(self): 
         print("Save file command")
@@ -957,8 +1127,46 @@ class ImageForge:
     def save_as_file(self): 
         print("Save as file command")
     
-    def undo(self): print("Undo command")
-    def redo(self): print("Redo command")
+    # main.py-এ শুধু এই undo/redo methods গুলো রাখুন:
+
+    def undo(self):
+        print("🔄 Undo triggered")
+        
+        if (hasattr(self.app_state, 'history_manager') and 
+            hasattr(self.app_state, 'original_image') and
+            self.app_state.original_image):
+            
+            new_image, success = self.app_state.history_manager.undo(self.app_state.original_image)
+            
+            if success:
+                self.app_state.original_image = new_image
+                if hasattr(self.app_state, 'renderer'):
+                    self.app_state.renderer.render(force=True)
+                print("✅ Undo completed")
+            else:
+                print("❌ Nothing to undo")
+        else:
+            print("❌ Cannot undo")
+
+    def redo(self):
+        print("🔄 Redo triggered")
+        
+        if (hasattr(self.app_state, 'history_manager') and 
+            hasattr(self.app_state, 'original_image') and
+            self.app_state.original_image):
+            
+            new_image, success = self.app_state.history_manager.redo(self.app_state.original_image)
+            
+            if success:
+                self.app_state.original_image = new_image
+                if hasattr(self.app_state, 'renderer'):
+                    self.app_state.renderer.render(force=True)
+                print("✅ Redo completed")
+            else:
+                print("❌ Nothing to redo")
+        else:
+            print("❌ Cannot redo")
+
     def cut(self): print("Cut command")
     def copy(self): print("Copy command")
     def paste(self): print("Paste command")
@@ -1117,7 +1325,15 @@ class ImageForge:
     def system_info(self): print("System Info")
     def updates(self): print("Updates")
     def manage_extensions(self): print("Manage Extensions")
-    
+
+# dialogs/new_file_dialog.py
+class NewFileDialog(tk.Toplevel):
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.result = None
+        self.build_ui()
+
 
 if __name__ == "__main__":
     root = tk.Tk()

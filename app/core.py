@@ -1,13 +1,34 @@
-# app/core.py - COMPLETE VERSION
+# app/core.py - COMPLETE VERSION WITH MULTI-DOCUMENT SUPPORT
 import os
 import threading
-from typing import Dict, Optional, Callable, TYPE_CHECKING
+from typing import Dict, Optional, Callable, TYPE_CHECKING, List
 from PIL import Image, ImageTk
 import numpy as np
+from app.history import HistoryManager
 
 if TYPE_CHECKING:
     from tools.base_tool import BaseTool
     from app.renderer import Renderer
+
+class Document:
+    def __init__(self, filename=None, image=None, width=800, height=600):
+        self.filename = filename or "Untitled"
+        self.layers = []
+        self.active_layer_index = 0
+        self.zoom_level = 1.0
+        self.offset_x = 0
+        self.offset_y = 0
+        self.history_manager = HistoryManager()
+        
+        # Initialize with a background layer
+        if image:
+            bg_layer = Layer("Background")
+            bg_layer.image = image
+            self.layers.append(bg_layer)
+        else:
+            bg_layer = Layer("Background", width, height)
+            bg_layer.image = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+            self.layers.append(bg_layer)
 
 class AppState:
     def __init__(self, root):
@@ -15,19 +36,22 @@ class AppState:
         self.canvas = None
         self.active_tool = None
         self.tools: Dict[str, 'BaseTool'] = {}
-        self.layers = []
-        self.active_layer_index = -1
-        self.zoom_level = 1.0
-        self.history_manager = None
         self.worker_pool = None
         self.renderer = None
-        self.current_file = None
+        
+        # Multiple document support
+        self.documents: List[Document] = []
+        self.active_document_index = -1
+        
+        # Global properties (not document-specific)
         self.foreground_color = "black"
         self.background_color = "white"
-        
-        self.current_image = None
-        self.original_image = None
-        self.photo_reference = None
+    
+    @property
+    def active_document(self):
+        if 0 <= self.active_document_index < len(self.documents):
+            return self.documents[self.active_document_index]
+        return None
     
     def setup_renderer(self, canvas):
         from app.renderer import Renderer
@@ -45,6 +69,37 @@ class AppState:
         if tool_name in self.tools:
             self.active_tool = self.tools[tool_name]
             self.active_tool.on_activate()
+            return True
+        return False
+    
+    def create_new_document(self, width=800, height=600):
+        doc = Document(width=width, height=height)
+        self.documents.append(doc)
+        self.active_document_index = len(self.documents) - 1
+        return doc
+    
+    def open_document(self, filename, image):
+        doc = Document(filename=filename, image=image)
+        self.documents.append(doc)
+        self.active_document_index = len(self.documents) - 1
+        return doc
+    
+    def close_document(self, index):
+        """Close document and update active index - FIXED VERSION"""
+        if 0 <= index < len(self.documents):
+            # Remove the document
+            self.documents.pop(index)
+            
+            # Update active index properly
+            if len(self.documents) == 0:
+                self.active_document_index = -1
+            elif self.active_document_index >= len(self.documents):
+                self.active_document_index = len(self.documents) - 1
+            # If we closed a tab before the active tab, adjust index
+            elif index < self.active_document_index:
+                self.active_document_index -= 1
+            
+            print(f"✅ Document {index} closed. New active index: {self.active_document_index}")
             return True
         return False
 
