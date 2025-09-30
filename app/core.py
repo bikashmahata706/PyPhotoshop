@@ -78,11 +78,31 @@ class AppState:
         self.active_document_index = len(self.documents) - 1
         return doc
     
+    # In app/core.py - FIXED open_document method
+
     def open_document(self, filename, image):
-        doc = Document(filename=filename, image=image)
-        self.documents.append(doc)
-        self.active_document_index = len(self.documents) - 1
-        return doc
+        """Open document - FIXED VERSION"""
+        try:
+            print(f"📄 Creating document for: {filename}")
+            
+            # Create document with the image
+            doc = Document(filename=filename, image=image)
+            self.documents.append(doc)
+            self.active_document_index = len(self.documents) - 1
+            
+            print(f"✅ Document created: {doc.filename}, Layers: {len(doc.layers)}")
+            
+            # **FIXED: Ensure the layer has a valid image**
+            if doc.layers and doc.layers[0].image:
+                print(f"✅ Layer image size: {doc.layers[0].image.size}")
+            else:
+                print("❌ No valid layer image")
+                
+            return doc
+            
+        except Exception as e:
+            print(f"❌ Error creating document: {e}")
+            raise
     
     def close_document(self, index):
         """Close document and update active index - FIXED VERSION"""
@@ -102,6 +122,8 @@ class AppState:
             print(f"✅ Document {index} closed. New active index: {self.active_document_index}")
             return True
         return False
+    
+    
 
 class ToolManager:
     def __init__(self, app_state: AppState):

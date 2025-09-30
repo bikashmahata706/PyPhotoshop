@@ -700,6 +700,10 @@ class ImageForge:
         self.canvas.bind("<B1-Motion>", self.on_mouse_move)
         self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
         self.canvas.bind("<MouseWheel>", self.on_mouse_wheel)
+        self.canvas.bind("<Button-3>", self.on_right_click)  # Button-3 = right click
+        # self.canvas.bind("<Button-2>", self.on_right_click)  # Button-2 = middle click (alternative)
+        
+        print("✅ All event bindings set up")
     
     def create_layers_panel(self):
         # Layers panel (right side)
@@ -879,41 +883,229 @@ class ImageForge:
             else:
                 btn.config(bg="#404040", relief="flat")
     
+    # main.py - show_tool_options method-এ FIX করুন
     def show_tool_options(self, tool_id):
         # Clear existing options
         for widget in self.options_frame.winfo_children():
             widget.destroy()
         
-        # Add tool-specific options based on the selected tool
-        if tool_id == "move":
-            # Move tool options
-            auto_select = tk.Checkbutton(self.options_frame, text="Auto-Select", 
-                                        bg="#4d4d4d", fg="white", selectcolor="#2d2d30")
-            auto_select.pack(side=tk.LEFT, padx=5)
-            
-            tk.Label(self.options_frame, text="Show Transform Controls", 
-                    bg="#4d4d4d", fg="white").pack(side=tk.LEFT, padx=20)
-            
-            transform_ctl = tk.Checkbutton(self.options_frame, bg="#4d4d4d", 
-                                          fg="white", selectcolor="#2d2d30")
-            transform_ctl.pack(side=tk.LEFT, padx=5)
+        # Brush tool options - WITH PROPER INITIAL VALUES
+        if tool_id == "brush":
+            if self.app_state.active_tool:
+                brush_tool = self.app_state.active_tool
+                
+                # Main container for sliders
+                sliders_frame = tk.Frame(self.options_frame, bg="#4d4d4d")
+                sliders_frame.pack(side=tk.LEFT, padx=10)
+                
+                # ✅ FIX: Get CURRENT values from brush tool
+                current_size = brush_tool.brush_size
+                current_hardness = brush_tool.brush_hardness
+                current_opacity = brush_tool.brush_opacity
+                current_type = brush_tool.brush_type
+                
+                print(f"🎨 Loading brush options: Size={current_size}, Hardness={current_hardness}")
+                
+                # Brush Size Slider
+                size_frame = tk.Frame(sliders_frame, bg="#4d4d4d")
+                size_frame.pack(side=tk.LEFT, padx=5)
+                
+                # Size label and value
+                size_top_frame = tk.Frame(size_frame, bg="#4d4d4d")
+                size_top_frame.pack(fill=tk.X)
+                
+                tk.Label(size_top_frame, text="Size:", bg="#4d4d4d", fg="white", 
+                        font=("Arial", 8)).pack(side=tk.LEFT)
+                
+                self.size_value_var = tk.StringVar(value=f"{current_size}px")
+                size_value_label = tk.Label(size_top_frame, textvariable=self.size_value_var,
+                                        bg="#4d4d4d", fg="#007acc", font=("Arial", 8, "bold"))
+                size_value_label.pack(side=tk.RIGHT)
+                
+                # ✅ FIX: Initialize with CURRENT value
+                self.brush_size_var = tk.IntVar(value=current_size)
+                size_slider = tk.Scale(size_frame, from_=1, to=100, variable=self.brush_size_var,
+                                    orient=tk.HORIZONTAL, length=80, bg="#4d4d4d",
+                                    highlightthickness=0, showvalue=False, 
+                                    sliderlength=12, troughcolor="#606060")
+                size_slider.pack()
+                size_slider.bind("<B1-Motion>", self.on_brush_size_change)
+                size_slider.bind("<ButtonRelease-1>", self.on_brush_size_change)
+                
+                # Similarly for hardness and opacity...
+                # Hardness Slider
+                hardness_frame = tk.Frame(sliders_frame, bg="#4d4d4d")
+                hardness_frame.pack(side=tk.LEFT, padx=5)
+                
+                hardness_top_frame = tk.Frame(hardness_frame, bg="#4d4d4d")
+                hardness_top_frame.pack(fill=tk.X)
+                
+                tk.Label(hardness_top_frame, text="Hardness:", bg="#4d4d4d", fg="white",
+                        font=("Arial", 8)).pack(side=tk.LEFT)
+                
+                self.hardness_value_var = tk.StringVar(value=f"{current_hardness}%")
+                hardness_value_label = tk.Label(hardness_top_frame, textvariable=self.hardness_value_var,
+                                            bg="#4d4d4d", fg="#007acc", font=("Arial", 8, "bold"))
+                hardness_value_label.pack(side=tk.RIGHT)
+                
+                self.brush_hardness_var = tk.IntVar(value=current_hardness)
+                hardness_slider = tk.Scale(hardness_frame, from_=0, to=100, variable=self.brush_hardness_var,
+                                        orient=tk.HORIZONTAL, length=80, bg="#4d4d4d",
+                                        highlightthickness=0, showvalue=False,
+                                        sliderlength=12, troughcolor="#606060")
+                hardness_slider.pack()
+                hardness_slider.bind("<B1-Motion>", self.on_brush_hardness_change)
+                hardness_slider.bind("<ButtonRelease-1>", self.on_brush_hardness_change)
+                
+                # Opacity Slider
+                opacity_frame = tk.Frame(sliders_frame, bg="#4d4d4d")
+                opacity_frame.pack(side=tk.LEFT, padx=5)
+                
+                opacity_top_frame = tk.Frame(opacity_frame, bg="#4d4d4d")
+                opacity_top_frame.pack(fill=tk.X)
+                
+                tk.Label(opacity_top_frame, text="Opacity:", bg="#4d4d4d", fg="white",
+                        font=("Arial", 8)).pack(side=tk.LEFT)
+                
+                self.opacity_value_var = tk.StringVar(value=f"{current_opacity}%")
+                opacity_value_label = tk.Label(opacity_top_frame, textvariable=self.opacity_value_var,
+                                            bg="#4d4d4d", fg="#007acc", font=("Arial", 8, "bold"))
+                opacity_value_label.pack(side=tk.RIGHT)
+                
+                self.brush_opacity_var = tk.IntVar(value=current_opacity)
+                opacity_slider = tk.Scale(opacity_frame, from_=1, to=100, variable=self.brush_opacity_var,
+                                        orient=tk.HORIZONTAL, length=80, bg="#4d4d4d",
+                                        highlightthickness=0, showvalue=False,
+                                        sliderlength=12, troughcolor="#606060")
+                opacity_slider.pack()
+                opacity_slider.bind("<B1-Motion>", self.on_brush_opacity_change)
+                opacity_slider.bind("<ButtonRelease-1>", self.on_brush_opacity_change)
+                
+                # Brush type display
+                type_frame = tk.Frame(sliders_frame, bg="#4d4d4d")
+                type_frame.pack(side=tk.LEFT, padx=5)
+                
+                tk.Label(type_frame, text="Type:", bg="#4d4d4d", fg="white",
+                        font=("Arial", 8)).pack()
+                
+                self.brush_type_var = tk.StringVar(value=current_type)
+                type_label = tk.Label(type_frame, textvariable=self.brush_type_var,
+                                    bg="#4d4d4d", fg="#007acc", font=("Arial", 8, "bold"))
+                type_label.pack()
+
+    def show_quick_brush_settings(self):
+        """Quick brush settings dialog"""
+        from tkinter import simpledialog
         
-        elif tool_id == "rect_marquee":
-            # Marquee tool options
-            mode_var = tk.StringVar(value="New Selection")
-            mode_dropdown = ttk.Combobox(self.options_frame, textvariable=mode_var, 
-                                        values=["New Selection", "Add to Selection", "Subtract from Selection", "Intersect with Selection"],
-                                        state="readonly", width=16)
-            mode_dropdown.pack(side=tk.LEFT, padx=5)
+        new_size = simpledialog.askinteger("Brush Size", "Enter brush size:",
+                                        initialvalue=self.app_state.active_tool.brush_size,
+                                        minvalue=1, maxvalue=100)
+        if new_size:
+            self.app_state.active_tool.brush_size = new_size
+            self.size_display_var.set(f"{new_size}px")
+
+    def update_brush_display(self, size, hardness, opacity, brush_type):
+        """Update option bar when dialog changes - FIXED VERSION"""
+        print(f"🔄 update_brush_display called: Size={size}, Hardness={hardness}")
+        
+        # Update slider variables
+        if hasattr(self, 'brush_size_var'):
+            self.brush_size_var.set(size)
+            print(f"✅ Size var updated to: {size}")
+        
+        if hasattr(self, 'brush_hardness_var'):
+            self.brush_hardness_var.set(hardness)
+            print(f"✅ Hardness var updated to: {hardness}")
+        
+        if hasattr(self, 'brush_opacity_var'):
+            self.brush_opacity_var.set(opacity)
+            print(f"✅ Opacity var updated to: {opacity}")
+        
+        # Update display labels
+        if hasattr(self, 'size_value_var'):
+            self.size_value_var.set(f"{size}px")
+            print(f"✅ Size display updated to: {size}px")
+        
+        if hasattr(self, 'hardness_value_var'):
+            self.hardness_value_var.set(f"{hardness}%")
+            print(f"✅ Hardness display updated to: {hardness}%")
+        
+        if hasattr(self, 'opacity_value_var'):
+            self.opacity_value_var.set(f"{opacity}%")
+            print(f"✅ Opacity display updated to: {opacity}%")
+        
+        # Force UI update
+        self.option_bar.update_idletasks()
+        print("✅ Option bar refreshed")
+
+    def update_brush_options_from_dialog(self, size, hardness, opacity, brush_type):
+        """Callback function to update option bar from dialog"""
+        print(f"🔄 Updating from dialog: Size={size}, Hardness={hardness}, Opacity={opacity}")
+        
+        # Update the slider variables
+        if hasattr(self, 'brush_size_var'):
+            self.brush_size_var.set(size)
+        
+        if hasattr(self, 'brush_hardness_var'):
+            self.brush_hardness_var.set(hardness)
+        
+        if hasattr(self, 'brush_opacity_var'):
+            self.brush_opacity_var.set(opacity)
+        
+        # Force update the option bar display
+        self.update_brush_display(size, hardness, opacity, brush_type)
+
+    def update_option_bar_display(self):
+        """Update the visual display of option bar without recreating"""
+        # Find and update the existing labels/sliders
+        for widget in self.options_frame.winfo_children():
+            if hasattr(widget, 'widgetName') and widget.winfo_children():
+                for child in widget.winfo_children():
+                    if isinstance(child, tk.Label):
+                        # Update brush info label
+                        if hasattr(self, 'brush_size_var') and hasattr(self, 'brush_hardness_var'):
+                            new_text = f"Brush: {self.brush_size_var.get()}px | {self.brush_hardness_var.get()}%"
+                            child.config(text=new_text)
+                            break
+
+    def on_brush_size_change(self, event):
+        """Handle brush size change from option bar - WITH SYNC"""
+        if hasattr(self.app_state, 'active_tool') and self.app_state.active_tool:
+            new_size = self.brush_size_var.get()
             
-            tk.Label(self.options_frame, text="Feather:", bg="#4d4d4d", fg="white").pack(side=tk.LEFT, padx=(20, 5))
-            feather_var = tk.StringVar(value="0 px")
-            feather_entry = tk.Entry(self.options_frame, textvariable=feather_var, width=6, bg="#3c3c3c", fg="white")
-            feather_entry.pack(side=tk.LEFT, padx=5)
+            # Update brush tool
+            self.app_state.active_tool.brush_size = new_size
             
-            anti_alias = tk.Checkbutton(self.options_frame, text="Anti-alias", 
-                                       bg="#4d4d4d", fg="white", selectcolor="#2d2d30")
-            anti_alias.pack(side=tk.LEFT, padx=20)
+            # Update value display
+            self.size_value_var.set(f"{new_size}px")
+            
+            # Sync with dialog if open
+            if hasattr(self, 'current_brush_dialog') and self.current_brush_dialog:
+                self.current_brush_dialog.sync_from_option_bar('size', new_size)
+
+    def on_brush_hardness_change(self, event):
+        if hasattr(self.app_state, 'active_tool') and self.app_state.active_tool:
+            new_hardness = self.brush_hardness_var.get()
+            self.app_state.active_tool.brush_hardness = new_hardness
+            self.hardness_value_var.set(f"{new_hardness}%")
+            
+            if hasattr(self, 'current_brush_dialog') and self.current_brush_dialog:
+                self.current_brush_dialog.sync_from_option_bar('hardness', new_hardness)
+
+    def on_brush_opacity_change(self, event):
+        if hasattr(self.app_state, 'active_tool') and self.app_state.active_tool:
+            new_opacity = self.brush_opacity_var.get()
+            self.app_state.active_tool.brush_opacity = new_opacity
+            self.opacity_value_var.set(f"{new_opacity}%")
+            
+            if hasattr(self, 'current_brush_dialog') and self.current_brush_dialog:
+                self.current_brush_dialog.sync_from_option_bar('opacity', new_opacity)
+
+    def show_brush_advanced_options(self):
+        """Show advanced brush options dialog"""
+        from dialogs.brush_options_dialog import BrushOptionsDialog
+        dialog = BrushOptionsDialog(self.root, self.app_state)
+        self.root.wait_window(dialog)
     
     def show_tool_group_menu(self, event, group_name, tools, group_tool_id):
         # Create context menu for tool group
@@ -929,14 +1121,27 @@ class ImageForge:
     
     def choose_color(self, which):
         # Open color picker dialog (Photoshop style)
-        color = colorchooser.askcolor(title=f"Choose {which} Color", 
-                                     initialcolor=self.foreground_color if which == "foreground" else self.background_color)
+        color = colorchooser.askcolor(
+            title=f"Choose {which} Color", 
+            initialcolor=self.foreground_color if which == "foreground" else self.background_color
+        )
+        
         if color[1]:
             if which == "foreground":
                 self.foreground_color = color[1]
+                self.app_state.foreground_color = color[1]  # AppState-এও update করুন
                 self.fg_color_btn.config(bg=color[1])
+                
+                # ✅ Brush tool-এ color automatically update করুন
+                if (hasattr(self.app_state, 'active_tool') and 
+                    self.app_state.active_tool and 
+                    hasattr(self.app_state.active_tool, 'brush_color')):
+                    self.app_state.active_tool.brush_color = color[1]
+                    print(f"🎨 Brush color updated to: {color[1]}")
+                    
             else:
                 self.background_color = color[1]
+                self.app_state.background_color = color[1]
                 self.bg_color_btn.config(bg=color[1])
     
     def swap_colors(self):
@@ -1019,20 +1224,127 @@ class ImageForge:
             print(f"Linking {len(selection)} layers")
     
     def on_right_click(self, event):
-        # Create context menu based on active tool
-        context_menu = tk.Menu(self.root, tearoff=0, bg="#2d2d30", fg="white")
+        """Windows 11 right-click handler - SIMPLE TEST"""
+        print(f"🖱️ WINDOWS RIGHT-CLICK: button={event.num}, x={event.x}, y={event.y}")
         
-        # Add tool-specific context menu items
-        if self.app_state.active_tool and hasattr(self.app_state.active_tool, 'get_context_menu'):
-            menu_items = self.app_state.active_tool.get_context_menu()
-            for label, command in menu_items:
-                if label == "---":
-                    context_menu.add_separator()
-                else:
-                    context_menu.add_command(label=label, command=command)
+        # Test if brush tool is active
+        if (self.app_state.active_tool and 
+            hasattr(self.app_state.active_tool, 'name') and 
+            "Brush" in self.app_state.active_tool.name):
+            
+            print("🎨 Brush tool active - showing dialog")
+            self.show_brush_context_dialog(event.x_root, event.y_root)
+            return "break"  # Stop event propagation
         
-        # Display the context menu
-        context_menu.post(event.x_root, event.y_root)
+        else:
+            print("❌ Brush tool not active or not found")
+            # Show simple context menu for other tools
+            context_menu = tk.Menu(self.root, tearoff=0, bg="#2d2d30", fg="white")
+            context_menu.add_command(label="Tool Options", command=lambda: print("Tool options"))
+            context_menu.add_command(label="Help", command=lambda: print("Help"))
+            context_menu.post(event.x_root, event.y_root)
+        
+        return "break"  # Important: stop event propagation
+
+    def show_brush_context_dialog(self, x, y):
+        """Show brush dialog - WINDOWS 11 COMPATIBLE"""
+        print(f"🔄 Showing dialog at screen coordinates: ({x}, {y})")
+        
+        try:
+            from dialogs.brush_context_dialog import BrushContextDialog
+            
+            if self.app_state.active_tool:
+                # Use the screen coordinates directly (they're already correct)
+                dialog = BrushContextDialog(self.root, self.app_state.active_tool, x, y)
+                
+                # Wait for dialog to close
+                self.root.wait_window(dialog)
+                print("✅ Dialog closed successfully")
+            else:
+                print("❌ No active tool found")
+                
+        except Exception as e:
+            print(f"❌ Dialog error: {e}")
+            # Fallback: show simple message
+            import tkinter.messagebox as messagebox
+            messagebox.showinfo("Brush", f"Brush Size: {self.app_state.active_tool.brush_size}")
+
+    def sync_from_dialog(self, setting_type, value):
+        """Sync option bar from dialog changes"""
+        if getattr(self, 'is_syncing', False):
+            return
+            
+        self.is_syncing = True
+        
+        try:
+            if setting_type == 'size' and hasattr(self, 'brush_size_var'):
+                self.brush_size_var.set(value)
+                if hasattr(self, 'size_value_var'):
+                    self.size_value_var.set(f"{value}px")
+                    
+            elif setting_type == 'hardness' and hasattr(self, 'brush_hardness_var'):
+                self.brush_hardness_var.set(value)
+                if hasattr(self, 'hardness_value_var'):
+                    self.hardness_value_var.set(f"{value}%")
+                    
+            elif setting_type == 'opacity' and hasattr(self, 'brush_opacity_var'):
+                self.brush_opacity_var.set(value)
+                if hasattr(self, 'opacity_value_var'):
+                    self.opacity_value_var.set(f"{value}%")
+                    
+            elif setting_type == 'type' and hasattr(self, 'brush_type_var'):
+                self.brush_type_var.set(value)
+                
+        finally:
+            self.is_syncing = False
+
+    def update_brush_options(self, size, hardness, opacity, brush_type):
+        """Update option bar from dialog changes"""
+        print(f"🔄 Updating option bar: Size={size}, Hardness={hardness}")
+        
+        # Update slider variables
+        if hasattr(self, 'brush_size_var'):
+            self.brush_size_var.set(size)
+        if hasattr(self, 'brush_hardness_var'):
+            self.brush_hardness_var.set(hardness)
+        if hasattr(self, 'brush_opacity_var'):
+            self.brush_opacity_var.set(opacity)
+        
+        # Update display labels
+        if hasattr(self, 'size_value_var'):
+            self.size_value_var.set(f"{size}px")
+        if hasattr(self, 'hardness_value_var'):
+            self.hardness_value_var.set(f"{hardness}%")
+        if hasattr(self, 'opacity_value_var'):
+            self.opacity_value_var.set(f"{opacity}%")
+        
+        # Force UI update
+        self.option_bar.update_idletasks()
+
+    def show_simple_brush_info(self):
+        """Fallback simple brush info"""
+        if self.app_state.active_tool:
+            tool = self.app_state.active_tool
+            print(f"🖌️ Current Brush: Size={tool.brush_size}, Hardness={tool.brush_hardness}")
+
+
+    def reset_brush_settings(self):
+        """Reset brush to default settings"""
+        if self.app_state.active_tool:
+            self.app_state.active_tool.brush_size = 10
+            self.app_state.active_tool.brush_hardness = 80
+            self.app_state.active_tool.brush_opacity = 100
+            
+            # Update option bar sliders
+            self.brush_size_var.set(10)
+            self.brush_hardness_var.set(80)
+            self.brush_opacity_var.set(100)
+            
+            print("🔄 Brush settings reset to default")
+
+    def canvas_options(self):
+        """Placeholder for canvas options"""
+        print("Canvas options dialog")
     
     def on_mouse_down(self, event):
         if self.app_state.active_tool:
@@ -1127,45 +1439,69 @@ class ImageForge:
     def save_as_file(self): 
         print("Save as file command")
     
-    # main.py-এ শুধু এই undo/redo methods গুলো রাখুন:
+
+    # main.py - undo/redo methods আপডেট করুন
 
     def undo(self):
-        print("🔄 Undo triggered")
+        print("🔄 Smooth Undo triggered")
         
-        if (hasattr(self.app_state, 'history_manager') and 
-            hasattr(self.app_state, 'original_image') and
-            self.app_state.original_image):
+        active_doc = self.app_state.active_document
+        if not active_doc or not hasattr(active_doc, 'history_manager'):
+            print("❌ No document or history manager")
+            return
             
-            new_image, success = self.app_state.history_manager.undo(self.app_state.original_image)
+        active_layer = active_doc.layers[0]
+        
+        # **UPDATED: Get image, success, AND bbox**
+        new_image, success, bbox = active_doc.history_manager.undo(active_layer.image)
+        
+        if success:
+            active_layer.image = new_image
             
-            if success:
-                self.app_state.original_image = new_image
-                if hasattr(self.app_state, 'renderer'):
-                    self.app_state.renderer.render(force=True)
-                print("✅ Undo completed")
-            else:
-                print("❌ Nothing to undo")
+            # **OPTIMIZED: Use partial rendering if bbox available**
+            if hasattr(self.app_state, 'renderer'):
+                if bbox and hasattr(self.app_state.renderer, 'render_partial'):
+                    print(f"🔄 Partial undo render for bbox: {bbox}")
+                    self.app_state.renderer.render_partial(bbox)
+                else:
+                    print("🔄 Full undo render")
+                    if hasattr(self.app_state.renderer, 'mark_cache_dirty'):
+                        self.app_state.renderer.mark_cache_dirty()
+                    self.app_state.renderer.render()
+            print("✅ Smooth undo completed")
         else:
-            print("❌ Cannot undo")
+            print("❌ Nothing to undo")
 
     def redo(self):
-        print("🔄 Redo triggered")
+        print("🔄 Smooth Redo triggered")
         
-        if (hasattr(self.app_state, 'history_manager') and 
-            hasattr(self.app_state, 'original_image') and
-            self.app_state.original_image):
+        active_doc = self.app_state.active_document
+        if not active_doc or not hasattr(active_doc, 'history_manager'):
+            print("❌ No document or history manager")
+            return
             
-            new_image, success = self.app_state.history_manager.redo(self.app_state.original_image)
+        active_layer = active_doc.layers[0]
+        
+        # **UPDATED: Get image, success, AND bbox**
+        new_image, success, bbox = active_doc.history_manager.redo(active_layer.image)
+        
+        if success:
+            active_layer.image = new_image
             
-            if success:
-                self.app_state.original_image = new_image
-                if hasattr(self.app_state, 'renderer'):
-                    self.app_state.renderer.render(force=True)
-                print("✅ Redo completed")
-            else:
-                print("❌ Nothing to redo")
+            # **OPTIMIZED: Use partial rendering if bbox available**
+            if hasattr(self.app_state, 'renderer'):
+                if bbox and hasattr(self.app_state.renderer, 'render_partial'):
+                    print(f"🔄 Partial redo render for bbox: {bbox}")
+                    self.app_state.renderer.render_partial(bbox)
+                else:
+                    print("🔄 Full redo render")
+                    if hasattr(self.app_state.renderer, 'mark_cache_dirty'):
+                        self.app_state.renderer.mark_cache_dirty()
+                    self.app_state.renderer.render()
+            print("✅ Smooth redo completed")
         else:
-            print("❌ Cannot redo")
+            print("❌ Nothing to redo")
+
 
     def cut(self): print("Cut command")
     def copy(self): print("Copy command")

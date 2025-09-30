@@ -1,343 +1,372 @@
-# app/history.py - COMPLETE UNDO/REDO SYSTEM
+# app/history.py - COMPLETE SMOOTH UNDO/REDO VERSION
 
-import pickle
-import zlib
-from PIL import Image
-import io
 import os
-from datetime import datetime
-
-class HistoryAction:
-    """Base class for all history actions"""
-    def __init__(self, description):
-        self.description = description
-        self.timestamp = datetime.now()
-        self.affected_bbox = None  # (x1, y1, x2, y2) for partial updates
-    
-    def apply(self, image):
-        """Apply this action to an image"""
-        raise NotImplementedError("Subclasses must implement apply()")
-    
-    def revert(self, image):
-        """Revert this action from an image"""
-        raise NotImplementedError("Subclasses must implement revert()")
-    
-    def get_memory_usage(self):
-        """Estimate memory usage of this action"""
-        return 0
-
-class BrushStrokeAction(HistoryAction):
-    """History action for brush strokes"""
-    def __init__(self, description, stroke_data, brush_size, brush_color):
-        super().__init__(f"Brush: {description}")
-        self.stroke_data = stroke_data  # List of points [(x1,y1), (x2,y2), ...]
-        self.brush_size = brush_size
-        self.brush_color = brush_color
-        self.snapshot = None
-        self.affected_bbox = None
-        
-    def apply(self, image):
-        """Apply brush stroke to image"""
-        if self.snapshot is None:
-            # Take snapshot of affected area before applying
-            self._take_snapshot(image)
-        
-        # The brush stroke is already applied in real-time, so this is mostly for redo
-        pass
-    
-    def revert(self, image):
-        """Revert brush stroke by restoring snapshot"""
-        if self.snapshot and self.affected_bbox:
-            self._restore_snapshot(image)
-    
-    def _take_snapshot(self, image):
-        """Take snapshot of affected area"""
-        if not self.stroke_data:
-            return
-            
-        # Calculate bounding box of stroke with padding
-        x_coords = [p[0] for p in self.stroke_data]
-        y_coords = [p[1] for p in self.stroke_data]
-        
-        padding = self.brush_size + 10
-        x1 = max(0, min(x_coords) - padding)
-        y1 = max(0, min(y_coords) - padding)
-        x2 = min(image.width, max(x_coords) + padding)
-        y2 = min(image.height, max(y_coords) + padding)
-        
-        self.affected_bbox = (x1, y1, x2, y2)
-        
-        # Crop and save the affected region
-        region = image.crop(self.affected_bbox)
-        
-        # Convert to compressed bytes to save memory
-        buffer = io.BytesIO()
-        region.save(buffer, format='PNG', optimize=True)
-        self.snapshot = zlib.compress(buffer.getvalue())
-    
-    def _restore_snapshot(self, image):
-        """Restore snapshot to affected area"""
-        if self.snapshot and self.affected_bbox:
-            # Decompress and load the snapshot
-            decompressed = zlib.decompress(self.snapshot)
-            snapshot_image = Image.open(io.BytesIO(decompressed))
-            
-            # Paste back to original position
-            image.paste(snapshot_image, self.affected_bbox[:2])
-    
-    def get_memory_usage(self):
-        """Estimate memory usage"""
-        if self.snapshot:
-            return len(self.snapshot)
-        return 0
-
-class ImageLoadAction(HistoryAction):
-    """History action for image loading"""
-    def __init__(self, description, image_path):
-        super().__init__(f"Load: {description}")
-        self.image_path = image_path
-        self.previous_state = None
-        
-    def apply(self, image):
-        """Load image - handled by main application"""
-        pass
-    
-    def revert(self, image):
-        """Revert to previous state"""
-        if self.previous_state:
-            # Decompress previous image
-            decompressed = zlib.decompress(self.previous_state)
-            previous_image = Image.open(io.BytesIO(decompressed))
-            
-            # Replace current image
-            image = previous_image.copy()
-            return image
-        return image
-    
-    def set_previous_state(self, image):
-        """Store the previous image state"""
-        if image:
-            buffer = io.BytesIO()
-            image.save(buffer, format='PNG', optimize=True)
-            self.previous_state = zlib.compress(buffer.getvalue())
-
-class TransformationAction(HistoryAction):
-    """History action for transformations (resize, rotate, etc.)"""
-    def __init__(self, description, transform_type, parameters):
-        super().__init__(f"{transform_type}: {description}")
-        self.transform_type = transform_type
-        self.parameters = parameters
-        self.previous_state = None
-        self.previous_size = None
-        
-    def apply(self, image):
-        """Apply transformation"""
-        if self.transform_type == "resize":
-            new_width = self.parameters['width']
-            new_height = self.parameters['height']
-            return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        elif self.transform_type == "rotate":
-            angle = self.parameters['angle']
-            return image.rotate(angle, expand=True)
-        return image
-    
-    def revert(self, image):
-        """Revert transformation"""
-        if self.previous_state:
-            decompressed = zlib.decompress(self.previous_state)
-            return Image.open(io.BytesIO(decompressed))
-        return image
-    
-    def set_previous_state(self, image):
-        """Store previous image state"""
-        if image:
-            self.previous_size = image.size
-            buffer = io.BytesIO()
-            image.save(buffer, format='PNG', optimize=True)
-            self.previous_state = zlib.compress(buffer.getvalue())
+import tempfile
+from PIL import Image
+import numpy as np
+from typing import Tuple, Dict, Any, Optional, List
 
 class HistoryManager:
-    """Main history manager for undo/redo functionality"""
-    
-    def __init__(self, max_steps=50, max_memory_mb=100):
-        self.max_steps = max_steps
-        self.max_memory_mb = max_memory_mb * 1024 * 1024  # Convert to bytes
+    def __init__(self, max_history: int = 30):
+        self.history_stack = []
+        self.redo_stack = []
+        self.max_history = max_history
+        self.temp_dir = tempfile.mkdtemp(prefix="imageforge_")
         
-        self.undo_stack = []  # Actions that can be undone
-        self.redo_stack = []  # Actions that can be redone
+        # **NEW: Performance optimizations for smooth undo/redo**
+        self.memory_cache = {}
+        self.max_memory_cache = 8  # Increased for better performance
+        self.compression_quality = 4  # Faster compression
         
-        self.current_memory_usage = 0
-        self.enabled = True
+        # **NEW: Region-based undo tracking**
+        self.region_states = []
+        self.enable_partial_undo = True
         
-        print(f"✅ History Manager: {max_steps} steps, {max_memory_mb//(1024*1024)}MB max")
-    
-    def push_action(self, action, current_image=None):
-        """Push a new action to the history stack"""
-        if not self.enabled:
+        # **NEW: Smart caching for frequent operations**
+        self.last_full_state = None
+        self.last_full_key = None
+        
+        print(f"✅ Smooth HistoryManager initialized (max: {max_history})")
+
+    def push(self, image: Image.Image, action_name: str = "Action", bbox: Optional[Tuple] = None) -> bool:
+        """Save state to history - OPTIMIZED FOR SMOOTH OPERATION"""
+        try:
+            # **NEW: Smart state management**
+            cache_key = f"state_{len(self.history_stack)}_{action_name}"
+            
+            # Store in memory cache for instant access
+            self.memory_cache[cache_key] = image.copy()
+            
+            # **NEW: Only save to disk if necessary (lazy saving)**
+            if len(self.history_stack) < self.max_memory_cache:
+                temp_path = os.path.join(self.temp_dir, f"{cache_key}.png")
+                image.save(temp_path, "PNG", optimize=True, compress_level=self.compression_quality)
+            else:
+                temp_path = None
+            
+            # Add to history stack
+            history_entry = {
+                'path': temp_path,
+                'action': action_name,
+                'cache_key': cache_key,
+                'type': 'full'
+            }
+            
+            # **NEW: Store bounding box for partial rendering if provided**
+            if bbox and self.enable_partial_undo:
+                history_entry['bbox'] = bbox
+                history_entry['type'] = 'region_aware'
+            
+            self.history_stack.append(history_entry)
+            
+            # **NEW: Smart redo stack clearing**
+            self._smart_clear_redo()
+            
+            # **NEW: Optimized history limiting**
+            self._smart_enforce_limits()
+            
+            print(f"✅ History saved: {action_name} (memory: {len(self.memory_cache)})")
+            return True
+            
+        except Exception as e:
+            print(f"❌ History push error: {e}")
+            return False
+
+    def push_region(self, image: Image.Image, bbox: Tuple[int, int, int, int], action_name: str = "Brush Stroke") -> bool:
+        """**NEW: Optimized region-based history for brush strokes**"""
+        try:
+            if not self._is_region_worth_saving(bbox, image.size):
+                # Region too large, save full image instead
+                return self.push(image, action_name, bbox)
+                
+            x1, y1, x2, y2 = bbox
+            region = image.crop(bbox)
+            
+            # Store region in memory cache
+            cache_key = f"region_{len(self.history_stack)}"
+            self.memory_cache[cache_key] = region.copy()
+            
+            # Save region to disk only if necessary
+            if len(self.history_stack) < self.max_memory_cache:
+                temp_path = os.path.join(self.temp_dir, f"{cache_key}.png")
+                region.save(temp_path, "PNG", optimize=True, compress_level=self.compression_quality)
+            else:
+                temp_path = None
+            
+            # Add region state to history
+            self.history_stack.append({
+                'path': temp_path,
+                'action': action_name,
+                'cache_key': cache_key,
+                'type': 'region',
+                'bbox': bbox
+            })
+            
+            # Clear redo stack
+            self._smart_clear_redo()
+            
+            # Enforce limits
+            self._smart_enforce_limits()
+            
+            print(f"✅ Region history: {action_name} ({(x2-x1)}x{(y2-y1)})")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Region push error: {e}")
+            # Fallback to full image save
+            return self.push(image, action_name, bbox)
+
+    def _is_region_worth_saving(self, bbox: Tuple[int, int, int, int], image_size: Tuple[int, int]) -> bool:
+        """Check if region save is more efficient than full save"""
+        x1, y1, x2, y2 = bbox
+        region_area = (x2 - x1) * (y2 - y1)
+        total_area = image_size[0] * image_size[1]
+        
+        # Save region if it's less than 50% of total area (increased threshold for better performance)
+        return region_area < total_area * 0.5
+
+    def undo(self, current_image: Image.Image) -> Tuple[Image.Image, bool, Optional[Tuple]]:
+        """**SMOOTH UNDO: Fast undo with partial rendering support**"""
+        if not self.history_stack:
+            return current_image, False, None
+            
+        try:
+            # **NEW: Fast current state capture**
+            redo_cache_key = f"redo_{len(self.redo_stack)}"
+            self.memory_cache[redo_cache_key] = current_image.copy()
+            
+            # Save current state to redo stack (lazy disk saving)
+            if len(self.redo_stack) < self.max_memory_cache:
+                redo_path = os.path.join(self.temp_dir, f"{redo_cache_key}.png")
+                current_image.save(redo_path, "PNG", optimize=True, compress_level=self.compression_quality)
+            else:
+                redo_path = None
+            
+            self.redo_stack.append({
+                'path': redo_path,
+                'action': 'Redo State',
+                'cache_key': redo_cache_key,
+                'type': 'full'
+            })
+            
+            # **NEW: Fast state restoration from memory cache**
+            previous_state = self.history_stack.pop()
+            
+            # Get the previous image from memory cache
+            if previous_state['cache_key'] in self.memory_cache:
+                previous_image = self.memory_cache[previous_state['cache_key']].copy()
+            else:
+                # Fallback to disk load (should be rare)
+                previous_image = Image.open(previous_state['path'])
+                self.memory_cache[previous_state['cache_key']] = previous_image.copy()
+            
+            # **NEW: Handle different state types for optimal rendering**
+            bbox = None
+            result_image = previous_image
+            
+            if previous_state['type'] == 'region' and 'bbox' in previous_state:
+                # Region-based undo: paste region back onto current image
+                x1, y1, x2, y2 = previous_state['bbox']
+                current_image.paste(previous_image, (x1, y1))
+                result_image = current_image
+                bbox = previous_state['bbox']
+                
+            elif previous_state['type'] == 'region_aware' and 'bbox' in previous_state:
+                # Full image but with bbox info for partial rendering
+                bbox = previous_state['bbox']
+            
+            print(f"✅ Smooth Undo: {previous_state['action']}")
+            return result_image, True, bbox
+            
+        except Exception as e:
+            print(f"❌ Undo error: {e}")
+            return current_image, False, None
+
+    def redo(self, current_image: Image.Image) -> Tuple[Image.Image, bool, Optional[Tuple]]:
+        """**SMOOTH REDO: Fast redo with partial rendering support**"""
+        if not self.redo_stack:
+            return current_image, False, None
+            
+        try:
+            # **NEW: Fast current state capture**
+            history_cache_key = f"state_{len(self.history_stack)}"
+            self.memory_cache[history_cache_key] = current_image.copy()
+            
+            # Save current state to history stack (lazy disk saving)
+            if len(self.history_stack) < self.max_memory_cache:
+                history_path = os.path.join(self.temp_dir, f"{history_cache_key}.png")
+                current_image.save(history_path, "PNG", optimize=True, compress_level=self.compression_quality)
+            else:
+                history_path = None
+            
+            self.history_stack.append({
+                'path': history_path,
+                'action': 'History State',
+                'cache_key': history_cache_key,
+                'type': 'full'
+            })
+            
+            # **NEW: Fast state restoration from memory cache**
+            next_state = self.redo_stack.pop()
+            
+            if next_state['cache_key'] in self.memory_cache:
+                next_image = self.memory_cache[next_state['cache_key']].copy()
+            else:
+                # Fallback to disk load
+                next_image = Image.open(next_state['path'])
+                self.memory_cache[next_state['cache_key']] = next_image.copy()
+            
+            # **NEW: Handle bbox for partial rendering**
+            bbox = None
+            if next_state['type'] == 'region' and 'bbox' in next_state:
+                bbox = next_state['bbox']
+            elif next_state['type'] == 'region_aware' and 'bbox' in next_state:
+                bbox = next_state['bbox']
+            
+            print(f"✅ Smooth Redo")
+            return next_image, True, bbox
+            
+        except Exception as e:
+            print(f"❌ Redo error: {e}")
+            return current_image, False, None
+
+    def _smart_clear_redo(self):
+        """**NEW: Smart redo stack clearing with memory management**"""
+        # Clear disk files for redo stack
+        for state in self.redo_stack:
+            self._cleanup_state(state)
+        
+        # Clear memory cache entries for redo
+        redo_keys = [state['cache_key'] for state in self.redo_stack]
+        for key in redo_keys:
+            if key in self.memory_cache and not self._is_key_in_history(key):
+                del self.memory_cache[key]
+        
+        self.redo_stack.clear()
+
+    def _is_key_in_history(self, key: str) -> bool:
+        """Check if a cache key is in history stack"""
+        for state in self.history_stack:
+            if state['cache_key'] == key:
+                return True
+        return False
+
+    def _smart_enforce_limits(self):
+        """**NEW: Smart history limiting with memory optimization**"""
+        while len(self.history_stack) > self.max_history:
+            old_state = self.history_stack.pop(0)
+            self._cleanup_state(old_state)
+        
+        # **NEW: Smart memory cache cleanup**
+        self._optimize_memory_cache()
+
+    def _optimize_memory_cache(self):
+        """**NEW: Optimize memory cache while keeping recent states**"""
+        if len(self.memory_cache) <= self.max_memory_cache * 1.5:
             return
             
-        # Clear redo stack when new action is performed
-        self.redo_stack.clear()
+        # Get all keys from memory cache
+        all_keys = list(self.memory_cache.keys())
         
-        # For certain actions, store the previous state
-        if isinstance(action, ImageLoadAction) and current_image:
-            action.set_previous_state(current_image)
-        elif isinstance(action, TransformationAction) and current_image:
-            action.set_previous_state(current_image)
+        # Keep recent history and redo states
+        history_keys = [state['cache_key'] for state in self.history_stack[-self.max_memory_cache:]]
+        redo_keys = [state['cache_key'] for state in self.redo_stack[-self.max_memory_cache//2:]]
         
-        # Add to undo stack
-        self.undo_stack.append(action)
+        protected_keys = set(history_keys + redo_keys)
         
-        # Update memory usage
-        self.current_memory_usage += action.get_memory_usage()
-        
-        # Cleanup if limits are exceeded
-        self._cleanup_old_actions()
-        
-        print(f"📝 History: {action.description} (Memory: {self.current_memory_usage//1024}KB)")
-    
-    def undo(self, current_image):
-        """Undo the last action"""
-        if not self.undo_stack or not self.enabled:
-            return current_image, False
+        # Remove old entries
+        for key in all_keys:
+            if key not in protected_keys:
+                del self.memory_cache[key]
+                
+        print(f"🔄 Memory cache optimized: {len(self.memory_cache)} entries")
+
+    def _cleanup_state(self, state: Dict[str, Any]):
+        """Cleanup individual history state"""
+        try:
+            # Only remove from memory cache if not in active use
+            if (state['cache_key'] in self.memory_cache and 
+                not self._is_key_active(state['cache_key'])):
+                del self.memory_cache[state['cache_key']]
             
-        # Pop the last action
-        action = self.undo_stack.pop()
-        
-        # Revert the action
-        result_image = action.revert(current_image)
-        
-        # Move to redo stack
-        self.redo_stack.append(action)
-        
-        # Update memory usage (action moves between stacks, no change)
-        
-        print(f"↩️  Undo: {action.description}")
-        return result_image, True
-    
-    def redo(self, current_image):
-        """Redo the last undone action"""
-        if not self.redo_stack or not self.enabled:
-            return current_image, False
-            
-        # Pop from redo stack
-        action = self.redo_stack.pop()
-        
-        # Re-apply the action
-        result_image = action.apply(current_image)
-        
-        # Move back to undo stack
-        self.undo_stack.append(action)
-        
-        print(f"↪️  Redo: {action.description}")
-        return result_image, True
-    
-    def can_undo(self):
-        """Check if undo is possible"""
-        return len(self.undo_stack) > 0 and self.enabled
-    
-    def can_redo(self):
-        """Check if redo is possible"""
-        return len(self.redo_stack) > 0 and self.enabled
-    
-    def get_undo_description(self):
-        """Get description of next undo action"""
-        if self.can_undo():
-            return self.undo_stack[-1].description
-        return "Nothing to undo"
-    
-    def get_redo_description(self):
-        """Get description of next redo action"""
-        if self.can_redo():
-            return self.redo_stack[-1].description
-        return "Nothing to redo"
-    
-    def clear(self):
-        """Clear all history"""
-        self.undo_stack.clear()
-        self.redo_stack.clear()
-        self.current_memory_usage = 0
-        print("🗑️ History cleared")
-    
-    def get_history_info(self):
-        """Get history statistics"""
+            # Remove disk file if it exists
+            if state['path'] and os.path.exists(state['path']):
+                os.remove(state['path'])
+        except Exception as e:
+            print(f"⚠️ Cleanup warning: {e}")
+
+    def _is_key_active(self, key: str) -> bool:
+        """Check if cache key is in active history or redo stacks"""
+        for state in self.history_stack[-5:]:  # Check recent history
+            if state['cache_key'] == key:
+                return True
+        for state in self.redo_stack[-3:]:  # Check recent redo
+            if state['cache_key'] == key:
+                return True
+        return False
+
+    def get_history_info(self) -> Dict[str, Any]:
+        """**NEW: Enhanced history information for UI**"""
         return {
-            'undo_count': len(self.undo_stack),
-            'redo_count': len(self.redo_stack),
-            'memory_usage_kb': self.current_memory_usage // 1024,
-            'max_steps': self.max_steps,
-            'max_memory_mb': self.max_memory_mb // (1024 * 1024)
+            'total_actions': len(self.history_stack),
+            'can_undo': len(self.history_stack) > 0,
+            'can_redo': len(self.redo_stack) > 0,
+            'memory_usage': len(self.memory_cache),
+            'last_action': self.history_stack[-1]['action'] if self.history_stack else None,
+            'memory_efficiency': f"{len(self.memory_cache)}/{self.max_memory_cache}"
         }
-    
-    def _cleanup_old_actions(self):
-        """Cleanup old actions when limits are exceeded"""
-        # Check step count limit
-        while len(self.undo_stack) > self.max_steps:
-            old_action = self.undo_stack.pop(0)
-            self.current_memory_usage -= old_action.get_memory_usage()
+
+    def clear(self):
+        """Clear all history - OPTIMIZED"""
+        # Clear memory cache
+        self.memory_cache.clear()
         
-        # Check memory limit
-        while self.current_memory_usage > self.max_memory_mb and self.undo_stack:
-            old_action = self.undo_stack.pop(0)
-            self.current_memory_usage -= old_action.get_memory_usage()
-    
-    def save_history(self, filepath):
-        """Save history to file (for session persistence)"""
+        # Clear disk files
+        for state in self.history_stack + self.redo_stack:
+            try:
+                if state['path'] and os.path.exists(state['path']):
+                    os.remove(state['path'])
+            except:
+                pass
+        
+        # Clear stacks
+        self.history_stack.clear()
+        self.redo_stack.clear()
+        
+        print("✅ History cleared completely")
+
+    def enable_region_undo(self, enable: bool = True):
+        """**NEW: Enable/disable region-based undo**"""
+        self.enable_partial_undo = enable
+        print(f"🔄 Region-based undo: {'enabled' if enable else 'disabled'}")
+
+    def set_memory_cache_size(self, size: int):
+        """**NEW: Adjust memory cache size dynamically**"""
+        self.max_memory_cache = max(3, min(size, 20))  # Limit between 3-20
+        self._optimize_memory_cache()
+        print(f"🔄 Memory cache size set to: {self.max_memory_cache}")
+
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """**NEW: Get performance statistics**"""
+        memory_usage = sum(
+            img.size[0] * img.size[1] * 4  # Approximate memory (RGBA)
+            for img in self.memory_cache.values()
+        ) / (1024 * 1024)  # Convert to MB
+        
+        return {
+            'history_states': len(self.history_stack),
+            'redo_states': len(self.redo_stack),
+            'memory_cache_entries': len(self.memory_cache),
+            'estimated_memory_mb': round(memory_usage, 2),
+            'region_undo_enabled': self.enable_partial_undo,
+            'cache_efficiency': f"{len(self.memory_cache)}/{self.max_memory_cache}"
+        }
+
+    def __del__(self):
+        """Cleanup temp directory on destruction"""
         try:
-            with open(filepath, 'wb') as f:
-                data = {
-                    'undo_stack': self.undo_stack,
-                    'redo_stack': self.redo_stack,
-                    'current_memory_usage': self.current_memory_usage
-                }
-                pickle.dump(data, f)
-            print(f"💾 History saved: {filepath}")
-            return True
-        except Exception as e:
-            print(f"❌ History save error: {e}")
-            return False
-    
-    def load_history(self, filepath):
-        """Load history from file"""
-        try:
-            with open(filepath, 'rb') as f:
-                data = pickle.load(f)
-                self.undo_stack = data.get('undo_stack', [])
-                self.redo_stack = data.get('redo_stack', [])
-                self.current_memory_usage = data.get('current_memory_usage', 0)
-            print(f"📂 History loaded: {filepath}")
-            return True
-        except Exception as e:
-            print(f"❌ History load error: {e}")
-            return False
-    
-    def enable(self):
-        """Enable history tracking"""
-        self.enabled = True
-        print("✅ History enabled")
-    
-    def disable(self):
-        """Disable history tracking"""
-        self.enabled = False
-        print("⏸️ History disabled")
-
-# Factory functions for creating history actions
-def create_brush_stroke(stroke_points, brush_size, brush_color, description="Stroke"):
-    """Create a brush stroke history action"""
-    return BrushStrokeAction(description, stroke_points, brush_size, brush_color)
-
-def create_image_load(image_path, description=None):
-    """Create an image load history action"""
-    if description is None:
-        description = os.path.basename(image_path)
-    return ImageLoadAction(description, image_path)
-
-def create_resize(new_width, new_height, description="Resize"):
-    """Create a resize transformation action"""
-    params = {'width': new_width, 'height': new_height}
-    return TransformationAction(description, "resize", params)
-
-def create_rotation(angle, description="Rotate"):
-    """Create a rotation transformation action"""
-    params = {'angle': angle}
-    return TransformationAction(description, "rotate", params)
+            import shutil
+            if os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+        except:
+            pass
